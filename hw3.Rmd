@@ -1,0 +1,315 @@
+---
+title: "BIOST/EPI 357 Problem Set 3"
+author: "Yichen Lu"
+date: "2/18/2021"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE, echo = FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(echo = FALSE, include=TRUE)
+library(flexsurv)
+library(numDeriv)
+library(kableExtra)
+library(survMisc)
+library(msm)
+source("fitparametric.R")
+source("getmedianres.R")
+options("scipen"=100)
+```
+
+### PROBLEM 1
+(a) Describe and fit a proportional hazards model to estimate the association between risk of relapse and treatment. Provide an estimate and 95% confidence interval for the hazard ratio.
+
+```{r}
+# problem 1
+dt <- read.csv("ccg803.csv", sep = ",")
+s <- with(dt, Surv(duration, relapse))
+
+# 1(a) cox ph with rx only
+cox0 = coxph(s ~ rx, data = dt)
+summ <- summary(cox0)
+hr <- summ$conf.int[1]
+hr_lower <- summ$conf.int[3]
+hr_upper <- summ$conf.int[4]
+p <- summ$waldtest[3]
+```
+
+*We fit a cox model to understand estimate the association between risk of relapse and treatment.*
+
+*At all time points, the hazard rate for the dactinomycin group is `r round(hr, 4)` times (95% CI: `r round(hr_lower, 4)`, `r round(hr_upper, 4)`) of the hazard rate for those in the control group. Based on the p-value `r round(p, 4)` from the wald test, we reject the null hypothesis that the dactinomycin and the control group has the same hazard rate at the significance level of 0.05. Using likelihood ratio test and score test, we reached the same conclusion.*
+
+(b) Describe and fit a proportional hazards model to estimate the association between risk of relapse and treatment adjusting for white blood cell count and age. Provide an estimate and 95% confidence interval for each of the resulting hazard ratios.
+
+```{r}
+# 1(b) ph adjust for wbc (continuous) and age
+cox1 = coxph(s ~ rx + wbc + age, data = dt)
+summ <- summary(cox1)
+hr <- summ$conf.int[1,1]
+hr_lower <- summ$conf.int[1,3]
+hr_upper <- summ$conf.int[1,4]
+p <- summ$coefficients[1,5]
+```
+
+*We fit a cox model to understand estimate the association between risk of relapse and treatment adjusting for age and white blood cell count (continuous).*
+
+*At all time points, the hazard rate for the dactinomycin group is `r round(hr, 4)` times (95% CI: `r round(hr_lower, 4)`, `r round(hr_upper, 4)`) of the hazard rate for those in the control group adjusting for age and white blood cell count. Based on the p-value `r round(p, 4)` associated with the treatment, we reject the null hypothesis that the dactinomycin and the control group adjusting for age and white blood cell count has the same hazard rate at the significance level of 0.05.*
+
+(c) Describe and fit a proportional hazards model to determine whether the association between risk of relapse and treatment adjusting for white blood cell count and age differs in subpopulations of patients defined by white blood cell count being either below 10,000 (wbc < 100), or above or at 10,000 (wbc >= 100). Provide an estimate and 95% confidence interval for the hazard ratio corresponding to each of these subpopulations. Perform a test of the hypothesis that this association does not differ in these subpopulations.
+
+```{r}
+# 1(c) ph model adjusting for age and interaction between rx and high_wbc
+dt$high_wbc <- ifelse(dt$wbc >= 100, 1, 0)
+cox_int = coxph(s ~ rx * high_wbc + age, data = dt)
+summ <- summary(cox_int)
+p <- summ$coefficients[4, 5]
+
+# anova
+anov <- anova(cox_int, coxph(s ~ rx + high_wbc + age, data = dt))
+p_anova <- anov$`P(>|Chi|)`[2]
+
+# HR for the low white blood cell count (< 100)
+wbc0_est <- summ$conf.int[1,1]
+wbc0_low <- summ$conf.int[1,3]
+wbc0_high <-summ$conf.int[1,4]
+
+# HR for the high white blood cell count (>= 100)
+wbc1_est <- exp(coef(cox_int)["rx"] + coef(cox_int)["high_wbc"] + coef(cox_int)["rx:high_wbc"])
+se <- deltamethod(g = ~ exp(x1 + x2 + x3),
+                  mean = 
+                    coef(cox_int)[c("rx", "high_wbc", "rx:high_wbc")],
+                  cov = 
+                    vcov(cox_int)[c("rx", "high_wbc", "rx:high_wbc"),
+                                  c("rx", "high_wbc", "rx:high_wbc")])
+wbc1_low <- wbc1_est - 1.96 * se
+wbc1_high <- wbc1_est + 1.96 * se
+```
+
+*We fit a cox model with interaction term between age and white blood cell count (binary, < 100 vs >= 100).*
+
+*For those with low white blood cell count (< 100), the hazard ratio estimate is `r round(wbc0_est, 4)` and 95% confidence interval is (`r round(wbc0_low, 4)`, `r round(wbc0_high, 4)`). For those with high blood cell count (>= 100), the hazard ratio estimate is `r round(wbc1_est, 4)` and 95% confidence interval is (`r round(wbc1_low, 4)`, `r round(wbc1_high, 4)`). *
+
+*For the interaction term between blood cell count (binary) and treatment, We get a p value of `r p` so we fail to reject the null hypothesis that association between risk of relapse and treatment does not differ in these subpopulations defined by white blood cell count at the significance level of 0.05.*
+
+*We can also perform a likelihood ratio test to compare this model to the one using white blood count (binary) as a predictor without the interaction. The test returns a p-value `r round(p_anova, 4)`, allowing us to reject the null hypotehsis.*
+
+(d) Describe and fit a proportional hazards model to estimate the association between risk of relapse and treatment adjusting for white blood cell count, age and recruitment site. Provide an estimate and 95% confidence interval for each of the resulting hazard ratios.
+
+```{r}
+# 1(d) stratified ph model adjusting for age and wbc
+cox = coxph(s ~ rx +  age + wbc + strata(institution), dt)
+summ <- summary(cox)
+hr <- summ$conf.int[1,1]
+hr_lower <- summ$conf.int[1,3]
+hr_upper <- summ$conf.int[1,4]
+p <- summ$coefficients[1, 5]
+```
+
+*We fit a stratified proportional hazard model with recruiting site as the stratification factor, adjusted for age and white blood count (continuous). We adjusted for incarceration history and clinic.*
+
+*At all time points, the hazard rate for the dactinomycin group is `r round(hr, 4)` times (95% CI: `r round(hr_lower, 4)`, `r round(hr_upper, 4)`) of the hazard rate for those in the control group adjusting for age, white blood cell count and stratified by site. Based on the p-value `r round(p, 4)` associated with treatment, we reject the null hypothesis that the dactinomycin and the control group adjusting for age, white blood cell count, and stratified by site, has the same hazard rate at the significance level of 0.05.*
+
+(e) Based on the proportional hazards model you fitted in (b), display on a single graph estimates of the relapse-free survival curves for the subpopulation of
+
+* (i) 5 year-old treated patients with wbc = 40.
+* (ii) 5 year-old control patients with wbc = 40.
+* (iii) 5 year-old treated patients with wbc = 200.
+* (iv) 5 year-old control patients with wbc = 200.
+
+```{r}
+# 1(e) survival curves
+plot(survfit(cox1, newdata = data.frame(rx = 1, age = 5, wbc = 40)), col = "blue")
+lines(survfit(cox1, newdata = data.frame(rx = 0, age = 5, wbc = 40)), col = "orange")
+lines(survfit(cox1, newdata = data.frame(rx = 1, age = 5, wbc = 200)), col = "pink")
+lines(survfit(cox1, newdata = data.frame(rx = 0, age = 5, wbc = 200)), col = "green")
+
+legend("topright", c("5 year-old treated patients with wbc = 40", 
+                     "5 year-old control patients with wbc = 40",
+                     "5 year-old treated patients with wbc = 200",
+                     "5 year-old control patients with wbc = 200"), 
+       col=c("blue", "orange", "pink", "green"),
+       lwd=c(2, 2), cex=0.8, bty="n")
+```
+
+### PROBLEM 2
+
+(a) Describe and fit a proportional hazards model to estimate the association between risk of exit from maintenance and methadone dosage adjusting for history of incarceration and clinic as regular predictors. Provide an estimate and 95% confidence interval for each of the resulting hazard ratios.
+
+```{r}
+# problem 2
+dt <- read.csv("addicts.csv", sep = ",")
+s <- with(dt, Surv(time, event))
+
+# 2(a) model adjusting for prison and clinic
+cox = coxph(s ~ dose + prison + clinic, dt)
+summ <- summary(cox)
+hr <- summ$conf.int[1,1]
+hr_lower <- summ$conf.int[1,3]
+hr_upper <- summ$conf.int[1,4]
+p <- summ$coefficients[1,5]
+```
+
+*We fit a proportional hazard model to understand the association between risk of exit and methadone dosage. We adjusted for incarceration history and clinic. At all time points, for every unit increase in dosage, the hazard rate is `r round(hr, 4)` times (95% CI: `r round(hr_lower, 4)`, `r round(hr_upper, 4)`) of the hazard rate for those with the original dosage adjusting for history of incarceration and clinic. Based on the p-value for the methadone dosage `r round(p, 10)` which is < 0.001, we reject the null hypothesis that the risk of exit from maintenance is not associated with methadone dosage adjusting for history of incarceration and clinic at the significance level of 0.05.*
+
+(b) In the following questions, use stratified proportional hazards model with clinic as stratifying variable.
+
+Describe and fit a proportional hazards model to estimate the association between risk of exit from maintenance and methadone dosage adjusting for clinic via **stratification** as well as adjusting for history of previous incarceration. Provide an estimate and 95% confidence interval for each of the resulting hazard ratios. Discuss the implication of using clinic as a stratifying variable. Has the interpretation of these hazard ratios changed relative to the model you fitted in (a)?
+
+```{r, include = TRUE}
+# 2(b) stratified model adjusting for prison
+cox_stra = coxph(s ~ dose + prison + strata(clinic), dt)
+summ <- summary(cox_stra)
+hr <- summ$conf.int[1,1]
+hr_lower <- summ$conf.int[1,3]
+hr_upper <- summ$conf.int[1,4]
+p <- summ$coefficients[1,5]
+```
+
+*We fit a stratified proportional hazard model on clinic and adjusted for incarceration history. At all time points, for every unit increase in dosage, the hazard rate is `r round(hr, 4)` times (95% CI: `r round(hr_lower, 4)`, `r round(hr_upper, 4)`) of the hazard rate for those with the original dosage adjusting for history of incarceration and stratified by clinic. Based on the p-value associated the methadone dosage `r round(p, 10)` which is < 0.001, we reject the null hypothesis that the risk of exit from maintenance is not associated with methadone dosage adjusting for history of incarceration and stratified by clinic at the significance level of 0.05.*
+
+*Using clinic as a stratifying variable allows the baseline hazard rate function within each strata to differ so there is no requirement of proportionality across levels of the stratification variable clinic if we simply adjust for it. The interpretation of the hazard ratio is the same as in the fitted model for (a): its the hazard ratio comparing two methadone dosage with 1 unit difference but the same level of clinic. The interval is slightly larger compared to the model in (a) because the flexibility of the model makes the estimates less precise*
+
+(c) Describe and fit a proportional hazards model to determine whether the association between methadone dosage and risk of exit from maintenance adjusting for history of incarceration and clinic is different in those with and without a history of incarceration? Provide an estimate and 95% confidence interval for any summary that allows you to answer this question. 
+
+```{r}
+# 2(c) stratified model with interaction
+cox_int = coxph(s ~ dose + dose * prison + strata(clinic), dt)
+summ <- summary(cox_int)
+hr <- summ$conf.int[1,1]
+hr_lower <- summ$conf.int[1,3]
+hr_upper <- summ$conf.int[1,4]
+p <- summ$coefficients[3, 5]
+```
+
+*We fit a stratified proportional hazard model on clinic with the interaction term between dosage and incarceration history. At all time points, for every unit increase in dosage, the hazard rate is `r round(hr, 4)` times (95% CI: `r round(hr_lower, 4)`, `r round(hr_upper, 4)`) of the hazard rate for those with the original dosage for patients without history of incarceration and stratified by clinic. Based on the p-value `r round(p, 4)` from the wald test, we fail to reject the null hypothesis that the risk of exit from maintenance is not associated with methadone dosage for patients without history of incarceration and stratified by clinic at the significance level of 0.05.*
+
+Based on this model, provide an estimate and 95% confidence interval for the hazard ratio comparing patients from a given clinic with a history of incarceration receiving 120 mg/day of methadone to patients from the same clinic without a history of incarceration receiving 50 mg/day of methadone.
+
+```{r}
+# HR of the two patients and 95% CI using delta method
+est <- exp(70 * coef(cox_int)["dose"] + coef(cox_int)["prison"] + 120 * coef(cox_int)["dose:prison"])
+se <- deltamethod(g = ~ exp(70 * x1 + x2 + 120 * x3),
+                  mean = 
+                    coef(cox_int)[c("dose", "prison", "dose:prison")],
+                  cov = 
+                    vcov(cox_int)[c("dose", "prison", "dose:prison"),
+                                  c("dose", "prison", "dose:prison")])
+ci_low <- est - 1.96 * se
+ci_high <- est + 1.96 * se
+```
+
+*The hazard ratio estimate is `r round(est, 4)` and 95% confidence interval is (`r round(ci_low, 4)`, `r round(ci_high, 4)`) for patients from a given clinic with a history of incarceration receiving 120 mg/day of methadone to patients from the same clinic without a history of incarceration receiving 50 mg/day of methadone.*
+
+
+### Code
+
+```{r, eval = FALSE, include = TRUE, echo = TRUE}
+## problem 1
+dt <- read.csv("ccg803.csv", sep = ",")
+s <- with(dt, Surv(duration, relapse))
+
+# 1(a) cox ph with rx only
+cox0 = coxph(s ~ rx, data = dt)
+summ <- summary(cox0)
+hr <- summ$conf.int[1]
+hr_lower <- summ$conf.int[3]
+hr_upper <- summ$conf.int[4]
+p <- summ$waldtest[3]
+
+# 1(b) ph adjust for wbc (continuous) and age
+cox1 = coxph(s ~ rx + wbc + age, data = dt)
+summ <- summary(cox1)
+hr <- summ$conf.int[1,1]
+hr_lower <- summ$conf.int[1,3]
+hr_upper <- summ$conf.int[1,4]
+p <- summ$coefficients[1,5]
+
+# 1(c) ph model adjusting for age and interaction between rx and high_wbc
+dt$high_wbc <- ifelse(dt$wbc >= 100, 1, 0)
+cox_int = coxph(s ~ rx * high_wbc + age, data = dt)
+summ <- summary(cox_int)
+p <- summ$coefficients[4, 5]
+
+# anova
+anov <- anova(cox_int, coxph(s ~ rx + high_wbc + age, data = dt))
+p_anova <- anov$`P(>|Chi|)`[2]
+
+# HR for the low white blood cell count (< 100)
+wbc0_est <- summ$conf.int[1,1]
+wbc0_low <- summ$conf.int[1,3]
+wbc0_high <-summ$conf.int[1,4]
+
+# HR for the high white blood cell count (>= 100)
+wbc1_est <- exp(coef(cox_int)["rx"] + coef(cox_int)["high_wbc"] + coef(cox_int)["rx:high_wbc"])
+se <- deltamethod(g = ~ exp(x1 + x2 + x3),
+                  mean = 
+                    coef(cox_int)[c("rx", "high_wbc", "rx:high_wbc")],
+                  cov = 
+                    vcov(cox_int)[c("rx", "high_wbc", "rx:high_wbc"),
+                                  c("rx", "high_wbc", "rx:high_wbc")])
+wbc1_low <- wbc1_est - 1.96 * se
+wbc1_high <- wbc1_est + 1.96 * se
+
+# 1(d) stratified ph model adjusting for age and wbc
+cox = coxph(s ~ rx +  age + wbc + strata(institution), dt)
+summ <- summary(cox)
+hr <- summ$conf.int[1,1]
+hr_lower <- summ$conf.int[1,3]
+hr_upper <- summ$conf.int[1,4]
+p <- summ$coefficients[1, 5]
+
+# 1(e) survival curves
+plot(survfit(cox1, newdata = data.frame(rx = 1, age = 5, wbc = 40)), col = "blue")
+lines(survfit(cox1, newdata = data.frame(rx = 0, age = 5, wbc = 40)), col = "orange")
+lines(survfit(cox1, newdata = data.frame(rx = 1, age = 5, wbc = 200)), col = "pink")
+lines(survfit(cox1, newdata = data.frame(rx = 0, age = 5, wbc = 200)), col = "green")
+
+legend("topright", c("5 year-old treated patients with wbc = 40", 
+                     "5 year-old control patients with wbc = 40",
+                     "5 year-old treated patients with wbc = 200",
+                     "5 year-old control patients with wbc = 200"), 
+       col=c("blue", "orange", "pink", "green"),
+       lwd=c(2, 2), cex=0.8, bty="n")
+
+## problem 2
+dt <- read.csv("addicts.csv", sep = ",")
+s <- with(dt, Surv(time, event))
+
+# 2(a) model adjusting for prison and clinic
+cox = coxph(s ~ dose + prison + clinic, dt)
+summ <- summary(cox)
+hr <- summ$conf.int[1,1]
+hr_lower <- summ$conf.int[1,3]
+hr_upper <- summ$conf.int[1,4]
+p <- summ$coefficients[1,5]
+
+# 2(b) stratified model adjusting for prison
+cox_stra = coxph(s ~ dose + prison + strata(clinic), dt)
+summ <- summary(cox_stra)
+hr <- summ$conf.int[1,1]
+hr_lower <- summ$conf.int[1,3]
+hr_upper <- summ$conf.int[1,4]
+p <- summ$coefficients[1,5]
+
+# 2(c) stratified model with interaction
+cox_int = coxph(s ~ dose + dose * prison + strata(clinic), dt)
+summ <- summary(cox_int)
+hr <- summ$conf.int[1,1]
+hr_lower <- summ$conf.int[1,3]
+hr_upper <- summ$conf.int[1,4]
+p <- summ$coefficients[3, 5]
+
+# HR of the two patients and 95% CI using delta method
+est <- exp(70 * coef(cox_int)["dose"] + coef(cox_int)["prison"] + 120 * coef(cox_int)["dose:prison"])
+se <- deltamethod(g = ~ exp(70 * x1 + x2 + 120 * x3),
+                  mean = 
+                    coef(cox_int)[c("dose", "prison", "dose:prison")],
+                  cov = 
+                    vcov(cox_int)[c("dose", "prison", "dose:prison"),
+                                  c("dose", "prison", "dose:prison")])
+ci_low <- est - 1.96 * se
+ci_high <- est + 1.96 * se
+```

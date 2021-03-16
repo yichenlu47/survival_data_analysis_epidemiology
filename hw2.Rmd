@@ -1,0 +1,421 @@
+---
+title: "BIOST/EPI 357 Problem Set 2"
+author: "Yichen Lu"
+date: "2/4/2021"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE, echo = FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(echo = FALSE, include=FALSE)
+library(flexsurv)
+library(numDeriv)
+library(kableExtra)
+library(survMisc)
+source("fitparametric.R")
+source("getmedianres.R")
+options("scipen"=100)
+```
+
+## PROBLEM 1
+(a) Compute the Kaplan-Meier and Nelson-Aalen (cumulative hazard) estimators by filling the following tables (using as many rows as you need)
+
+```{r}
+km_na <- function(time, event){
+  dt <- as.data.frame(cbind(time = time, event = event))
+  uniq_time <- unique(dt$time)
+  cal <- sapply(1:length(uniq_time), function(k){
+    u <- sort(uniq_time)[k]
+    d <- sum(dt$time == u & dt$event == 1)
+    n = sum(dt$time >= u)
+    cbind(u, d, n)
+  }, simplify = FALSE)
+  cal_comb <- as.data.frame(do.call(rbind, cal))
+  cal_comb$d_n = cal_comb$d/cal_comb$n
+  cal_comb$d_n_reverse = 1 - cal_comb$d_n
+  cal_comb$S = NULL
+  cal_comb$S <- ifelse(cal_comb$u == min(cal_comb$u), cal_comb$d_n_reverse, cumprod(cal_comb$d_n_reverse))
+  cal_comb$H <- cumsum(cal_comb$d_n)
+  cal_comb
+}
+trt_time <- c(9, 11, 14, 20, 23, 28, 31, 33, 45, 45, 49, 152)
+trt_event <-c(1,  1,  0,  1,  1,  0,  1,  1,  1,  0,  1,   0)
+trt_km <- km_na(trt_time, trt_event)
+
+ctrl_time <- c(3, 5, 7, 7, 10, 12, 16, 25, 27, 30, 38, 43, 48)
+ctrl_event <-c(1, 1, 1, 1,  0,  1,  0,  1,  1,  1,  1,  1,  1)
+ctrl_km <- km_na(ctrl_time, ctrl_event)
+```
+
+*Table 1: Maintenance group*
+
+```{r, include = TRUE}
+kable(
+  trt_km,
+  col.names = c('time t', '# at risk (n)', '# events (d)', 'd/n', '1 - d/n', 'S(t)', 'H' ), align = "lcccccc", digits = 2)
+```
+
+*Table 2: Control group*
+
+```{r, include = TRUE}
+kable(
+  ctrl_km,
+  col.names = c('time t', '# at risk (n)', '# events (d)', 'd/n', '1 - d/n', 'S(t)', 'H' ), align = "lcccccc", digits = 2)
+```
+
+(b) For each group, what is the estimated probability that no relapse will occur by 36 months?
+
+```{r}
+trt_36 <- trt_km[trt_km$u == max(trt_km$u[trt_km$u <= 36]),]$S
+ctrl_36 <- trt_km[ctrl_km$u == max(ctrl_km$u[ctrl_km$u <= 36]),]$S
+```
+
+*For the maintenance group, the probability is `r trt_36`. For the control group, the probability is `r ctrl_36`.*
+
+## PROBLEM 2
+(a) Plot the Kaplan-Meier estimator of the survival function of the time until exit from maintenance along with pointwise 95% confidence intervals. What is the estimated probability that no exit will occur by one year? Provide a 95% confidence interval for your answer.
+
+```{r, include = TRUE}
+dt <- read.csv("addicts.csv", sep = ",")
+s.addicts <- with(dt, Surv(time, event))
+km.addicts = survfit(s.addicts ~ 1, conf.type = "log-log")
+plot(km.addicts, main = "Kaplan-Meier survivor estimate", ylab = "Survival probability", xlab = "Time (days)")
+```
+
+```{r}
+s_oneyear <- round(km.addicts$surv[km.addicts$time == max(km.addicts$time[km.addicts$time < 365])],3)
+s_lower_oneyear <- km.addicts$lower[km.addicts$time == max(km.addicts$time[km.addicts$time < 365])]
+s_upper_oneyear <- km.addicts$upper[km.addicts$time == max(km.addicts$time[km.addicts$time < 365])]
+s_ci_oneyear <- paste0("(", round(s_lower_oneyear, 3), ", ", round(s_upper_oneyear, 3), ")")
+```
+
+*The estimated probability is `r s_oneyear` with 95% CI `r s_ci_oneyear`.*
+
+(b) Provide the estimated median time until exit from maintenance and associated 95% confidence interval by:
+i. scrutinizing values of the Kaplan-Meier estimator and associated confidence intervals (explain how you obtain your answer)
+
+```{r}
+s_med <- round(km.addicts$time[km.addicts$surv == min(km.addicts$surv[km.addicts$surv >= 0.5])]/365 * 12,3)
+med_lower <- km.addicts$time[km.addicts$lower == min(km.addicts$lower[km.addicts$lower >= 0.5], na.rm = TRUE)][2] /365 * 12
+med_upper <- km.addicts$time[km.addicts$upper == min(km.addicts$upper[km.addicts$upper >= 0.5], na.rm = TRUE)][2] /365 * 12
+med_ci <- paste0("(", round(med_lower, 3), ", ", round(med_upper, 3), ")")
+```
+
+*Using Kaplan-Meier estimator, the estimated median time is `r s_med` with 95% CI `r med_ci`.*
+
+ii. using the median estimate and confidence intervals provided by the survfit command.
+
+```{r}
+s_med <- round(504/365*12,3)
+med_ci <- paste0("(", round(394/365*12, 3), ", ", round(550/365*12, 3), ")")
+```
+
+*The estimated median time using `survfit` command is `r s_med` with 95% CI `r med_ci`.*
+
+(c) In this part, you will investigate differences between patients with and without a history of incarceration.
+
+i. On the same graph, plot the Kaplan-Meier estimator of the survival function of the time until exit from maintenance for patients with a history of incarceration and for patients without.
+
+```{r, include = TRUE}
+km.incar = survfit(s.addicts ~ prison, data = dt, conf.type = "log-log")
+plot(km.incar, col=c("blue", "orange"), conf.times = 365/12*8, lwd=2, cex=1.5,
+     main = "Kaplan-Meier survivor estimate", 
+     ylab = "Survival probability", xlab = "Time (days)")
+legend ("topright", c ("prison= 0", "prison= 1") , col=c("blue", "orange") ,
+        lwd=c(2,2) , cex=1.2)
+```
+
+ii. Does the probability that no exit occurred by 8 months differ significantly between these two groups?
+
+```{r}
+summ <- summary(km.incar, times = 365/12*8)
+prison0_ci <- paste0("(", round(summ$lower[1], 3), ", ", round(summ$upper[1], 3), ")")
+prison1_ci <- paste0("(", round(summ$lower[2], 3), ", ", round(summ$upper[2], 3), ")")
+z_stat <- abs(summ$surv[2] - summ$surv[1])/sqrt(summ$std.err[1]^2 + summ$std.err[2]^2)
+```
+
+*The 95% CI for the probability that no exit occurred by 8 months for group with history of incarceration `r prison1_ci` overlaps with that of group without history of incarceration `r prison0_ci`. Therefore we can not reject the hypothesis that the two probabilities are the same at the significance level of 0.05. We can also calculate the Z statistics which is `r z_stat` which is not larger than 1.96. So we can reach the same conclusion.*
+
+iii. Based on the logrank test, does the distribution of time until exit from maintenance differ significantly by history of incarceration?
+
+```{r}
+surv_diff <- survdiff(s.addicts ~ prison, data = dt)
+chi <- surv_diff$chisq
+p <- pchisq(surv_diff$chisq, df=1, lower.tail=FALSE)
+```
+
+*Based on the logrank test, we get a chi squared score of `r chi` on degree of freedom = 1, which corresponds to a p-value of `r p`. So we fail to reject the null hypothesis that the the distribution of time until exit from maintenance differ significantly by history of incarceration at the significance level of 0.05.*
+
+iv. Based on the Wilcoxon-Gehan-Breslow test, does the distribution of time until exit from maintenance differ significantly by history of incarceration?
+
+```{r}
+comp(ten(km.incar))$tests$lrTests
+p <- 2 * pnorm(-abs(1.12176))
+```
+
+*Based on the Wilcoxon-Gehan-Breslow test, we get a Z score of 1.12176, which corresponds to a p-value of `r p`. So we fail to reject the null hypothesis that the the distribution of time until exit from maintenance differ significantly by history of incarceration at the significance level of 0.05.*
+
+v. Plot estimated hazard functions for patients with and without a history of incarceration. Briefly indicate how this plot may inform you regarding the power of the logrank test as well as expected differences in the magnitude of the chi-square statistics from the logrank and Wilcoxon-Gehan-Breslow tests.
+
+```{r, include = TRUE}
+plot(km.incar, fun = "cumhaz",
+     col=c("blue", "orange") , lwd=2, cex=1.5,
+     main = "Kaplan-Meier survivor estimate",
+     ylab = "Cumulative hazard", xlab = "Time (days)")
+legend ("topright", c ("prison= 0", "prison= 1") , col=c("blue", "orange") ,
+        lwd=c(2,2) , cex=1.2)
+```
+
+*We see that the cumulative hazard for the two groups overlap with each other, indicating that the treatment effect may not be large enough such that we won't have enough power to detect the difference in hazard rate between the two arms. This correspond to the large p-value from both logrank and Wilcoxon-Gehan-Breslow tests which we reached the conclusion that we failed to reject the null hypothesis that the hazard rates for the two arms were the same*
+
+(d) Repeat (c) but substituting history of incarceration by methadone dosage dichotomized at 60mg/day (i.e., compare the subpopulation of patients administered more than 60 mg/day of methadone to the subpopulation of patients administered no more than 60 mg/day).
+
+```{r}
+dt$high_dose = (dt$dose > 60)
+km.dose = survfit(s.addicts ~ high_dose, data = dt, conf.type = "log-log")
+
+# Does the probability that no exit occurred by 8 months differ significantly between these two groups
+summ <- summary(km.dose, times = 365/12*8)
+dose0_ci <- paste0("(", round(summ$lower[1], 3), ", ", round(summ$upper[1], 3), ")")
+dose1_ci <- paste0("(", round(summ$lower[2], 3), ", ", round(summ$upper[2], 3), ")")
+z_stat <- abs(summ$surv[2] - summ$surv[1])/sqrt(summ$std.err[1]^2 + summ$std.err[2]^2)
+
+# Based on the logrank test, does the distribution of time until exit from maintenance differ significantly by dosage?
+surv_diff <- survdiff(s.addicts ~ dose, data = dt)
+chi <- surv_diff$chisq
+p <- pchisq(surv_diff$chisq, df=1, lower.tail=FALSE)
+
+
+# Based on the Wilcoxon-Gehan-Breslow test, does the distribution of time until exit from maintenance differ significantly by dosage
+comp(ten(km.dose))$tests$lrTests
+p <- 2 * pnorm(-abs(4.9534))
+```
+
+*Kaplan-Meier estimator of the survival function of the time until exit from maintenance for patients with methadone dosage > 60mg/day vs <= 60 mg/day.*
+
+```{r, include = TRUE}
+plot(km.dose, col=c("blue", "orange") , conf.times = 365/12*8, 
+     lwd=2, cex=1.5,
+     main = "Kaplan-Meier survivor estimate", 
+     ylab = "Survival probability", xlab = "Time (days)")
+legend ("topright", c ("low dose", "high dose") , col=c("blue", "orange") ,
+        lwd=c(2,2) , cex=1.2)
+```
+
+*The 95% CI for the probability that no exit occurred by 8 months for high dosage group `r dose1_ci` does not overlap with that of low dosage group `r dose0_ci`. Therefore we can reject the hypothesis that the two probabilities are the same at the significance level of 0.05. We can also calculate the Z statistics which is `r z_stat` which is much larger than 1.96. So we can reach the same conclusion.*
+
+*Based on the logrank test, We get a chi squared score of `r chi` on degree of freedom = 1, which corresponds to a p-value of `r p`. So we reject the null hypothesis that the the distribution of time until exit from maintenance differ significantly by methadone dosage at the significance level of 0.05.*
+
+*Based on the Wilcoxon-Gehan-Breslow test, we get a Z score of 4.9534, which corresponds to a p-value of `r p`. So we reject the null hypothesis that the the distribution of time until exit from maintenance differ significantly by history of incarceration at the significance level of 0.05.*
+
+*Plot estimated cumulative hazard functions for patients with methadone dosage dichotomized at 60mg/day.*
+
+```{r, include = TRUE}
+plot(km.dose, fun = "cumhaz",
+     col=c("blue", "orange") , lwd=2, cex=1.5,
+     main = "Kaplan-Meier survivor estimate", 
+     ylab = "Cumulative hazard", xlab = "Time (days)")
+legend ("topright", c ("Low dose", "High dose") , col=c("blue", "orange") ,
+        lwd=c(2,2) , cex=1.2)
+```
+
+*We see that the cumulative hazard for the two groups does not overlap with each other, indicating that the treatment effect may be large enough such that we will have enough power to detect the difference in hazard rate between the two arms. This correspond to the small p-value from both logrank and Wilcoxon-Gehan-Breslow tests which we reached the conclusion that we reject the null hypothesis that the hazard rates for the two arms were the same*
+
+(e) Based on a stratified logrank test, does the time until exit from maintenance differ by history of previous incarceration adjusting for clinic membership? State explicitly what the null and alternative hypotheses are and contrast with what they are in a standard logrank test.
+
+```{r}
+surv_diff <- survdiff(s.addicts ~ prison + strata(clinic), data = dt)
+chi <- surv_diff$chisq
+p <- pchisq(surv_diff$chisq, df=1, lower.tail = FALSE)
+```
+
+*Null hypothesis for the standard logrank test is that the hazard ratio comparing individuals with and without history of incarceration is 1. For stratified logrank test, the null hypothesis is the hazard ratio comparing individuals with and without history of incarceration at the same clinic is 1.*
+
+*Alternative hypothesis for the standard logrank test is that the hazard ratio comparing individuals with and without history of incarceration is not 1. For stratified logrank test, the alternative hypothesis is the hazard ratio comparing individuals with and without history of incarceration at the same clinic is not 1.*
+
+*Based on the stratified logrank test, We get a chi squared score of `r chi` on degree of freedom = 1, which corresponds to a p-value of `r p`. So we reject the null hypothesis that the the distribution of time until exit from maintenance differ significantly by incarceration history stratified at the same clinic at the significance level of 0.05.*
+
+(f) What is the estimated median residual time until exit from maintenance at 4, 8 and 12 months? Calculate these estimates using only values of the Kaplan-Meier estimator. Verify your answer using the R function provided for this purpose, and obtain 95% confidence intervals to accompany your estimates.
+
+```{r}
+res_time <- function(med_time){
+  S <- 0.5 * summary(km.addicts, times = round(365/12 * med_time))$surv
+  est_med <- min(km.addicts$time[km.addicts$surv == max(km.addicts$surv[km.addicts$surv <= S])])/365 * 12 - med_time
+  r_med <- getmedianres(s.addicts, times = round(365/12 * med_time), confint = TRUE)
+  r_med_ci <- paste0(round(r_med$estimates/365 * 12, 3), " (95% CI: ",
+                     round(r_med$ci.lower/365 * 12, 3), ", ",
+                     round(r_med$ci.upper/365 * 12, 3), ")")
+  return(list(round(est_med, 3), r_med_ci))
+}
+```
+
+*Using only values of the Kaplan-Meier estimator, the estimated median residual time until exit from maintenance at 4, 8 and 12 months are `r res_time(4)[[1]]`, `r res_time(8)[[1]]`, `r res_time(12)[[1]]` months, respectively.*
+
+*With the R function, estimated median residual time until exit from maintenance and the corresponding 95% CI at 4, 8 and 12 months are `r res_time(4)[[2]]`, `r res_time(8)[[2]]`, `r res_time(12)[[2]]` months, respectively.*
+
+
+
+## Code
+
+```{r, eval = FALSE, include = TRUE, echo = TRUE}
+library(flexsurv)
+library(numDeriv)
+library(kableExtra)
+library(survMisc)
+source("fitparametric.R")
+source("getmedianres.R")
+options("scipen"=100)
+
+## PROBLEM 1
+# (a) the Kaplan-Meier and Nelson-Aalen (cumulative hazard)
+km_na <- function(time, event){
+  dt <- as.data.frame(cbind(time = time, event = event))
+  uniq_time <- unique(dt$time)
+  cal <- sapply(1:length(uniq_time), function(k){
+    u <- sort(uniq_time)[k]
+    d <- sum(dt$time == u & dt$event == 1)
+    n = sum(dt$time >= u)
+    cbind(u, d, n)
+  }, simplify = FALSE)
+  cal_comb <- as.data.frame(do.call(rbind, cal))
+  cal_comb$d_n = cal_comb$d/cal_comb$n
+  cal_comb$d_n_reverse = 1 - cal_comb$d_n
+  cal_comb$S = NULL
+  cal_comb$S <- ifelse(cal_comb$u == min(cal_comb$u), cal_comb$d_n_reverse, cumprod(cal_comb$d_n_reverse))
+  cal_comb$H <- cumsum(cal_comb$d_n)
+  cal_comb
+}
+trt_time <- c(9, 11, 14, 20, 23, 28, 31, 33, 45, 45, 49, 152)
+trt_event <-c(1,  1,  0,  1,  1,  0,  1,  1,  1,  0,  1,   0)
+trt_km <- km_na(trt_time, trt_event)
+
+ctrl_time <- c(3, 5, 7, 7, 10, 12, 16, 25, 27, 30, 38, 43, 48)
+ctrl_event <-c(1, 1, 1, 1,  0,  1,  0,  1,  1,  1,  1,  1,  1)
+ctrl_km <- km_na(ctrl_time, ctrl_event)
+
+# Table 1: Maintenance group
+kable(
+  trt_km,
+  col.names = c('time t', '# at risk (n)', '# events (d)', 'd/n', '1 - d/n', 'S(t)', 'H' ), align = "lcccccc", digits = 2)
+
+# Table 2: Control group*
+kable(
+  ctrl_km,
+  col.names = c('time t', '# at risk (n)', '# events (d)', 'd/n', '1 - d/n', 'S(t)', 'H' ), align = "lcccccc", digits = 2)
+
+# (b) the estimated probability that no relapse will occur by 36 months?
+trt_36 <- trt_km[trt_km$u == max(trt_km$u[trt_km$u <= 36]),]$S
+ctrl_36 <- trt_km[ctrl_km$u == max(ctrl_km$u[ctrl_km$u <= 36]),]$S
+
+
+## Rroblem 2
+# 2 (a) the Kaplan-Meier estimator of the survival function of the time until exit from maintenance along with pointwise 95% confidence intervals
+dt <- read.csv("addicts.csv", sep = ",")
+s.addicts <- with(dt, Surv(time, event))
+km.addicts = survfit(s.addicts ~ 1, conf.type = "log-log")
+plot(km.addicts, main = "Kaplan-Meier survivor estimate", ylab = "Survival probability", xlab = "Time (days)")
+
+s_oneyear <- round(km.addicts$surv[km.addicts$time == max(km.addicts$time[km.addicts$time < 365])],3)
+s_lower_oneyear <- km.addicts$lower[km.addicts$time == max(km.addicts$time[km.addicts$time < 365])]
+s_upper_oneyear <- km.addicts$upper[km.addicts$time == max(km.addicts$time[km.addicts$time < 365])]
+s_ci_oneyear <- paste0("(", round(s_lower_oneyear, 3), ", ", round(s_upper_oneyear, 3), ")")
+
+# (b) i. Provide the estimated median time until exit from maintenance and associated 95% confidence interval 
+s_med <- round(km.addicts$time[km.addicts$surv == min(km.addicts$surv[km.addicts$surv >= 0.5])]/365 * 12,3)
+med_lower <- km.addicts$time[km.addicts$lower == min(km.addicts$lower[km.addicts$lower >= 0.5], na.rm = TRUE)][2] /365 * 12
+med_upper <- km.addicts$time[km.addicts$upper == min(km.addicts$upper[km.addicts$upper >= 0.5], na.rm = TRUE)][2] /365 * 12
+med_ci <- paste0("(", round(med_lower, 3), ", ", round(med_upper, 3), ")")
+
+# ii. the median estimate and confidence intervals provided by the survfit command.
+s_med <- round(504/365*12,3)
+med_ci <- paste0("(", round(394/365*12, 3), ", ", round(550/365*12, 3), ")")
+
+
+# (c) i. the Kaplan-Meier estimator of the survival function
+km.incar = survfit(s.addicts ~ prison, data = dt, conf.type = "log-log")
+plot(km.incar, col=c("blue", "orange"), conf.times = 365/12*8, lwd=2, cex=1.5,
+     main = "Kaplan-Meier survivor estimate", 
+     ylab = "Survival probability", xlab = "Time (days)")
+legend ("topright", c ("prison= 0", "prison= 1") , col=c("blue", "orange") ,
+        lwd=c(2,2) , cex=1.2)
+
+# ii. the probability that no exit occurred by 8 months differ significantly between these two groups
+summ <- summary(km.incar, times = 365/12*8)
+prison0_ci <- paste0("(", round(summ$lower[1], 3), ", ", round(summ$upper[1], 3), ")")
+prison1_ci <- paste0("(", round(summ$lower[2], 3), ", ", round(summ$upper[2], 3), ")")
+z_stat <- abs(summ$surv[2] - summ$surv[1])/sqrt(summ$std.err[1]^2 + summ$std.err[2]^2)
+
+#iii. logrank test
+surv_diff <- survdiff(s.addicts ~ prison, data = dt)
+chi <- surv_diff$chisq
+p <- pchisq(surv_diff$chisq, df=1, lower.tail=FALSE)
+
+# iv. Wilcoxon-Gehan-Breslow test
+comp(ten(km.incar))$tests$lrTests
+p <- 2 * pnorm(-abs(1.12176))
+
+# v. Plot estimated hazard functions for patients with and without a history of incarceration
+plot(km.incar, fun = "cumhaz",
+     col=c("blue", "orange") , lwd=2, cex=1.5,
+     main = "Kaplan-Meier survivor estimate",
+     ylab = "Cumulative hazard", xlab = "Time (days)")
+legend ("topright", c ("prison= 0", "prison= 1") , col=c("blue", "orange") ,
+        lwd=c(2,2) , cex=1.2)
+
+
+# (d) the probability that no exit occurred by 8 months differ significantly between these two groups
+dt$high_dose = (dt$dose > 60)
+km.dose = survfit(s.addicts ~ high_dose, data = dt, conf.type = "log-log")
+
+summ <- summary(km.dose, times = 365/12*8)
+dose0_ci <- paste0("(", round(summ$lower[1], 3), ", ", round(summ$upper[1], 3), ")")
+dose1_ci <- paste0("(", round(summ$lower[2], 3), ", ", round(summ$upper[2], 3), ")")
+z_stat <- abs(summ$surv[2] - summ$surv[1])/sqrt(summ$std.err[1]^2 + summ$std.err[2]^2)
+
+# logrank test
+surv_diff <- survdiff(s.addicts ~ dose, data = dt)
+chi <- surv_diff$chisq
+p <- pchisq(surv_diff$chisq, df=1, lower.tail=FALSE)
+
+# Wilcoxon-Gehan-Breslow test
+comp(ten(km.dose))$tests$lrTests
+p <- 2 * pnorm(-abs(4.9534))
+
+# Kaplan-Meier estimator of the survival function of the time until exit from maintenance for patients with methadone dosage > 60mg/day vs <= 60 mg/day.*
+plot(km.dose, col=c("blue", "orange") , conf.times = 365/12*8, 
+     lwd=2, cex=1.5,
+     main = "Kaplan-Meier survivor estimate", 
+     ylab = "Survival probability", xlab = "Time (days)")
+legend ("topright", c ("low dose", "high dose") , col=c("blue", "orange") ,
+        lwd=c(2,2) , cex=1.2)
+
+# Plot estimated cumulative hazard functions for patients with methadone dosage dichotomized at 60mg/day.
+plot(km.dose, fun = "cumhaz",
+     col=c("blue", "orange") , lwd=2, cex=1.5,
+     main = "Kaplan-Meier survivor estimate", 
+     ylab = "Cumulative hazard", xlab = "Time (days)")
+legend ("topright", c ("Low dose", "High dose") , col=c("blue", "orange") ,
+        lwd=c(2,2) , cex=1.2)
+
+
+# (e) stratified logrank test
+surv_diff <- survdiff(s.addicts ~ prison + strata(clinic), data = dt)
+chi <- surv_diff$chisq
+p <- pchisq(surv_diff$chisq, df=1, lower.tail = FALSE)
+
+
+# (f) the estimated median residual time until exit from maintenance at 4, 8 and 12 month
+res_time <- function(med_time){
+  S <- 0.5 * summary(km.addicts, times = round(365/12 * med_time))$surv
+  est_med <- min(km.addicts$time[km.addicts$surv == max(km.addicts$surv[km.addicts$surv <= S])])/365 * 12 - med_time
+  r_med <- getmedianres(s.addicts, times = round(365/12 * med_time), confint = TRUE)
+  r_med_ci <- paste0(round(r_med$estimates/365 * 12, 3), " (95% CI: ",
+                     round(r_med$ci.lower/365 * 12, 3), ", ",
+                     round(r_med$ci.upper/365 * 12, 3), ")")
+  return(list(round(est_med, 3), r_med_ci))
+}
+```
+

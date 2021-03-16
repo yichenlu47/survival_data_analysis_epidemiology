@@ -1,0 +1,242 @@
+---
+title: "BIOST/EPI 357 Problem Set 1"
+author: "Yichen Lu"
+date: "1/16/2021"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE, echo = FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(echo = FALSE, include=FALSE)
+library(flexsurv)
+library(numDeriv)
+source("fitparametric.R")
+options("scipen"=100)
+```
+
+## PROBLEM 1
+(a) Individual A enrolled in the study at age 32 and never developed breast cancer during the study.
+
+*Right censoring, because the study ended before the patient experience the event.*
+
+(b) Individual B enrolled in the study at age 39 and was diagnosed with breast cancer at the fifth exam after enrollment.
+
+*Interval censoring, because we only know the diagnosis happened between 4th and 5th exam.*
+
+(c) Individual C enrolled in the study at age 55 and died from heart failure at age 61, without ever being diagnosed with breast cancer. Post-mortem examinations confirmed that this patient never developed breast cancer.
+
+*Right censoring, because there's no diagnosis before patient's death.*
+
+(d) Individual D enrolled in the study at age 45 and moved away from the community at age 56, without ever being diagnosed with breast cancer by investigators.
+
+*Right censoring, because the patient dropped out of the study before the patient had diagnosis.*
+
+If instead of age at onset of breast cancer we were interested in studying the time from enrollment into the study until onset of breast cancer, would your answers above be any different? If so, how?
+
+*They will be the same because the only difference is the initiating point and the right censoring which focus on the ending point won't be affected.*
+
+## PROBLEM 2
+
+(a) Describe the types of censoring and truncation affecting the data from this study.
+
+*The outcome of interest is the diagnosis of Crohn's disease until first bowel resection surgery or death. We have left truncation because patients had Crohn's disease but died or had the surgery before our study sampling date (shorter time) will be excluded and we may overestimate the outcome. Additionally, we also risk right censoring if the patients haven't had the event at the end of the 10-year follow up period. *
+
+(b) Consider the following statement: in this study, while T is subject to truncation, A is not and hence the observed ages at diagnosis are not affected by selection bias. Do you agree with this statement? Briefly explain why.
+
+*No, we still risk selection bias. When we choose a study sampling date and only include these who have the diagnosis but not the event, we likely excluded more senior patients than others because they were more likely to already have the surgery at the sampling time.*
+
+
+## PROBLEM 3
+Read Dickson et al. (1989) to learn about the Mayo PBC dataset, and answer the following questions about that study:
+(a) What is the study population?
+
+*312 patients with primary biliary cirrhosis from the Mayo Clinic. They were required to enroll in either of the two double-blinded, randomized trial evaluating the effect of D-penicillamine for primary biliary cirrhosis. For the cross-validation, the sample included 106 separate patients from the Mayo Clinic that were eligible for the trials but declined to participate.*
+
+(b) What is the initiating event (or time zero)?
+
+*Time of entry into the D-penicillamine trials*
+
+(c) What is the terminating event?
+
+*Death.*
+
+(d) What is the time scale?
+
+*Time from entry into trial to death (in years)*
+
+(e) What are the causes of censoring?
+
+*Lost to follow-up or had liver transplantation*
+
+(f) For each of the causes above, comment on whether you believe the underlying censoring mechanism may be related to the outcome of interest?
+
+*Patient who are lost to follow up should be censored and it's appropriate for this analysis if those who are lost to follow up had a equal possibility of being alive or death right after they exited the study. For those who had liver transplantation, they probably live longer and if we do not censor them, we can overestimate the time to death.*
+
+(g) Figure 3 in Dickson et al. (1989) presents survival curves for 106 cross-validation patients. Based on the Kaplan-Meier curves you see on this plot, for each of the three risk groups, approximately what
+proportion of individuals die **within five years**?
+
+*Low: 10%; medium: 45%; high: 80%*
+
+## PROBLEM 4
+(a) Compute the average follow-up time and the proportion of censored observations.
+
+```{r}
+dt <- read.csv("addicts.csv", sep = ",")
+```
+
+*The average follow-up time is `r mean(dt$time)`. The proportion of censroed observation is `r 1 - mean(dt$event)`.*
+
+(b) Using the available data, fit exponential, Weibull and generalized gamma models to the distribution of time to exit from maintenance. For each model, report parameter estimates, associated 95% confidence intervals and maximum loglikelihood value.
+
+```{r}
+s <- with(dt, Surv(time, event))
+parexp <- fitparametric(s, dist = "exp")
+exp_lambda <- paste0(round(parexp$coeff[1], digits = 4), " (95% CI: ", 
+                 round(parexp$coeff[2], 4), ", ",
+                 round(parexp$coeff[3], 4), ")")
+# parexp$loglik
+parweibull <- fitparametric(s, dist = "weibull")
+weibull_lambda <- paste0(round(parweibull$coeff[1,1], digits = 4), " (95% CI: ", 
+                 round(parweibull$coeff[1,2], 4), ", ",
+                 round(parweibull$coeff[1,3], 4), ")")
+weibull_p <- paste0(round(parweibull$coeff[2,1], digits = 4), " (95% CI: ", 
+                 round(parweibull$coeff[2,2], 4), ", ",
+                 round(parweibull$coeff[2,3], 4), ")")
+
+pargengamma <- fitparametric(s, dist = "gengamma")
+
+gengamma_mu <- paste0(round(pargengamma$coeff[1,1], digits = 4), " (95% CI: ", 
+                 round(pargengamma$coeff[1,2], 4), ", ",
+                 round(pargengamma$coeff[1,3], 4), ")")
+gengamma_sigma <- paste0(round(pargengamma$coeff[2,1], digits = 4), " (95% CI: ", 
+                 round(pargengamma$coeff[2,2], 4), ", ",
+                 round(pargengamma$coeff[2,3], 4), ")")
+gengamma_q <- paste0(round(pargengamma$coeff[3,1], digits = 4), " (95% CI: ", 
+                 round(pargengamma$coeff[3,2], 4), ", ",
+                 round(pargengamma$coeff[3,3], 4), ")")
+```
+
+*Exponential model: $\lambda$ = `r exp_lambda`, maximum loglikelihood = `r parexp$loglik`.*
+
+*Weibull model: $\lambda$ = `r weibull_lambda`, p = `r weibull_p`, maximum loglikelihood = `r parweibull$loglik`.*
+
+*Generalized gamma model: $\mu$ = `r gengamma_mu`, $\sigma$ = `r gengamma_sigma`, Q = `r gengamma_q`,maximum loglikelihood = `r pargengamma$loglik`*
+
+(c) Plot the survival function corresponding to each of the above parametric fits as well as a nonparametric estimator of the survival function on the same graph, and comment visually on the adequacy of the models considered.
+
+```{r, include = TRUE}
+fitexp <- flexsurvreg(Surv(time, event) ~1, data = dt, dist = "exp")
+fitweibull <- flexsurvreg(Surv(time, event) ~1, data = dt, dist = "weibull")
+fitgengamma <- flexsurvreg(Surv(time, event) ~1, data = dt, dist = "gengamma")
+
+
+plot(survfit(Surv(time, event) ~1, data = dt), conf.int = FALSE, mark.time = FALSE, xlab = "Time (Days)", ylab = "Survival probability")
+lines(fitexp, col = "red", ci = FALSE, lwd = 1.8, lty = 3)
+lines(fitweibull, col = "blue", ci = FALSE, lwd = 1.8, lty = 3)
+lines(fitgengamma, col = "green", ci = FALSE, lwd = 1.8, lty = 3)
+
+legend("topright", legend = c("Nonparamaetric estimator", "Exponential distribution", "Weibull distribution", "Generalized gamma distribution"), fill = c(1, "red", "blue", "green"))
+```
+
+(d) Is the Weibull model an appropriate simplification of the generalized gamma model in this example? Justify your answer by performing an appropriate statistical test.
+
+```{r}
+T_LRT <- -2 * (fitweibull$loglik - fitgengamma$loglik)
+p <-  1 - pchisq(T_LRT, df = 1)
+```
+
+*We consider a loglikihood ratio test between the generalized gamma and weibull fit. We compared the estimated log-likelihood under the full (generalized gamma) and null (weibull) model and got a statistics of `r T_LRT`. Under the null hypothesis the statistics follows a chi-square distribution of degree = 1 asymptotically. We then calculated the p-value associated with this LR: `r p` which is larger than 0.05. So its not a significant improvement to use generalized gamma distribution and the Weibull is a reasonable simplification.*
+
+(e) Using a Weibull model, provide an estimate and 95% confidence interval of:
+i. the median time until exit from maintenance
+
+```{r}
+wei <- fitparametric(s, dist = "weibull", feature = "quantile")
+median <- paste0(round(wei$feature[1], digits = 2), " (95% CI: ", 
+                 round(wei$feature[2], 2), ", ",
+                 round(wei$feature[3], 2), ")")
+```
+
+*The median time until exit from maintenance is `r median`*
+
+ii. the probability that no exit will occur by one year
+
+```{r}
+wei <- fitparametric(s, dist = "weibull", feature = "survival", t = 365)
+prob <- paste0(round(wei$feature[1], digits = 2), " (95% CI: ", 
+                 round(wei$feature[2], 2), ", ",
+                 round(wei$feature[3], 2), ")")
+```
+
+*The probability that no exit will occur by one year is `r prob`*
+
+iii. the probability that no exit will occur by two years given that no exit has occurred by one year
+
+```{r}
+wei <- fitparametric(s, dist = "weibull", feature = "condsurvival", t = 365 * 2, t0 = 365)
+prob <- paste0(round(wei$feature[1], digits = 2), " (95% CI: ", 
+                 round(wei$feature[2], 2), ", ",
+                 round(wei$feature[3], 2), ")")
+```
+
+*The probability that no exit will occur by two years given that no exit has occurred by one year is `r prob`*
+
+
+(f) Is the exponential model an appropriate simplification of the Weibull model in this example? Justify your answer by performing an appropriate statistical test.
+
+```{r}
+T_LRT <- -2 * (fitexp$loglik - fitweibull$loglik)
+p <-  1 - pchisq(T_LRT, df = 1)
+ci <- paste0("(", round(parweibull$coeff[2, 2], 4), ", ", round(parweibull$coeff[2, 3],4), ")")
+```
+
+*We consider a loglikihood ratio test between the weibull and exponential fit. We compared the estimated log-likelihood under the full (weibull) and null (exponential) model and got a statistics of `r T_LRT`. Under the null hypothesis the statistics follows a chi-square distribution of degree = 1 asymptotically. We then calculated the p-value associated with this LR: `r p` which is smaller than 0.05. So its a significant improvement to use weibull distribution and the exponential is not a reasonable simplification.* 
+
+*Additionally, we see that a 95% CI for p in the weibull distribution is `r ci`, which doesn’t include 1. So we reach the same conclusion that exponential is not a reasonable simplification.*
+
+(g) Separately fit an exponential model to the subset of individuals in clinic 1 and clinic 2. Report parameter estimates and corresponding 95% confidence intervals. Use the output of these two fits to determine whether the distribution of time to exit from maintenance differs significantly by clinic. Justify your answer by performing an appropriate statistical test.
+```{r}
+exp_clin1 <- flexsurvreg(Surv(time, event) ~ 1, data = dt[dt$clinic == 1,], dist = "exponential")
+exp_clin2 <- flexsurvreg(Surv(time, event) ~ 1, data = dt[dt$clinic == 2,], dist = "exponential")
+lambda_clin1 <- paste0(round(exp_clin1$res[1], digits = 6), " (95% CI: ", 
+                 round(exp_clin1$res[2], 6), ", ",
+                 round(exp_clin1$res[3], 6), ")")
+lambda_clin2 <- paste0(round(exp_clin2$res[1], digits = 6), " (95% CI: ", 
+                 round(exp_clin2$res[2], 6), ", ",
+                 round(exp_clin2$res[3], 6), ")")
+
+delta <- exp_clin1$res[1] - exp_clin2$res[1]
+delta_se <- sqrt(exp_clin1$res[4] ^ 2 + exp_clin2$res[4] ^ 2)
+T_W <- abs(delta) / delta_se
+p <- 2 * pnorm(-T_W)
+```
+
+*The $\lambda$ from the exponential model for individuals in clinic 1 = `r lambda_clin1`. The $\lambda$ from the exponential model for individuals in clinic 2 = `r lambda_clin2`. We see that the higher limit of $\lambda$ for patients in clinic 2 is smaller than the lower bound of $\lambda$ for patients in clinic 1. Since there's no overlap, We think the distribution of time to exit from maintenance differs significantly by clinic. To further confirm, we calculated the Wald statistic (normal distribution) and got a p value = `r p`  which is smaller than 0.05. So we can reject the null hypothesis that the distribution of time to exit from maintenance does not differ by clinic at a significance level of 0.05. * 
+ 
+
+
+
+(h) Repeat the last problem but substituting clinic by history of incarceration (i.e., prison).
+
+```{r}
+exp_prison1 <- flexsurvreg(Surv(time, event) ~ 1, data = dt[dt$prison == 1,], dist = "exponential")
+exp_prison0 <- flexsurvreg(Surv(time, event) ~ 1, data = dt[dt$prison == 0,], dist = "exponential")
+
+lambda_prison1 <- paste0(round(exp_prison1$res[1], digits = 6), " (95% CI: ", 
+                 round(exp_prison1$res[2], 6), ", ",
+                 round(exp_prison1$res[3], 6), ")")
+lambda_prison0 <- paste0(round(exp_clin2$res[1], digits = 6), " (95% CI: ", 
+                 round(exp_prison0$res[2], 6), ", ",
+                 round(exp_prison0$res[3], 6), ")")
+
+delta <- exp_prison0$res[1] - exp_prison1$res[1]
+delta_se <- sqrt(exp_prison0$res[4] ^ 2 + exp_prison1$res[4] ^ 2)
+T_W <- abs(delta) / delta_se
+p <- 2 * pnorm(-T_W)
+```
+
+*The $\lambda$ from the exponential model for individuals with no previous incarceration = `r lambda_prison0`. The $\lambda$ from the exponential model for individuals with previous incarceration = `r lambda_prison1`. We see that the lower limit of $\lambda$ for patients with previous incarceration is smaller than the higher bound of $\lambda$ for patients without previous incarceration. Since there's overlap, We think the distribution of time to exit from maintenance does not differ significantly by whether individuals have previous incarceration. To further confirm, we calculated the Wald statistic (normal distribution) and got a p value = `r p`  which is larger than 0.05. So we can not reject the null hypothesis that the distribution of time to exit from maintenance does not differ by clinic at a significance level of 0.05. * 
+ 

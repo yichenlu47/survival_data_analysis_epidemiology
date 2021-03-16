@@ -1,0 +1,357 @@
+---
+title: "BIOST/EPI 357 Problem Set 4"
+author: "Yichen Lu"
+date: "3/3/2021"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE, echo = FALSE}
+rm(list = ls())
+knitr::opts_chunk$set(echo = FALSE, include = TRUE)
+library(flexsurv)
+library(numDeriv)
+library(kableExtra)
+library(survMisc)
+library(msm)
+source("fitparametric.R")
+source("getmedianres.R")
+options("scipen"=100)
+```
+
+### PROBLEM 1
+```{r}
+## problem 1
+# (a)
+dt <- read.csv("addicts.csv", sep = ",")
+s <- with(dt, Surv(time, event))
+
+# aft weibull
+weibull_aft <- flexsurvreg(s ~ dose + as.factor(prison) + as.factor(clinic), data = dt, dist = "weibull")
+dose_coef <- exp(weibull_aft$res["dose","est"])
+pris_coef <- exp(weibull_aft$res["as.factor(prison)1","est"])
+clin_coef <- exp(weibull_aft$res["as.factor(clinic)2","est"])
+
+# lower bound
+dose_coef0 <- exp(weibull_aft$res["dose","L95%"])
+pris_coef0 <- exp(weibull_aft$res["as.factor(prison)1","L95%"])
+clin_coef0 <- exp(weibull_aft$res["as.factor(clinic)2","L95%"])
+
+# higher bound
+dose_coef1 <- exp(weibull_aft$res["dose","U95%"])
+pris_coef1 <- exp(weibull_aft$res["as.factor(prison)1","U95%"])
+clin_coef1 <- exp(weibull_aft$res["as.factor(clinic)2","U95%"])
+
+# aft generalized gamma
+gamma_aft <- flexsurvreg(s ~ dose + as.factor(prison) + as.factor(clinic), data = dt, dist = "gengamma")
+dose_gamma <- exp(gamma_aft$res["dose","est"])
+pris_gamma <- exp(gamma_aft$res["as.factor(prison)1","est"])
+clin_gamma <- exp(gamma_aft$res["as.factor(clinic)2","est"])
+
+# lower bound
+dose_gamma0 <- exp(gamma_aft$res["dose","L95%"])
+pris_gamma0 <- exp(gamma_aft$res["as.factor(prison)1","L95%"])
+clin_gamma0 <- exp(gamma_aft$res["as.factor(clinic)2","L95%"])
+
+# higher bound
+dose_gamma1 <- exp(gamma_aft$res["dose","U95%"])
+pris_gamma1 <- exp(gamma_aft$res["as.factor(prison)1","U95%"])
+clin_gamma1 <- exp(gamma_aft$res["as.factor(clinic)2","U95%"])
+
+# cox
+cox = coxph(s ~ dose + as.factor(prison) + as.factor(clinic), dt)
+cox_summ <- summary(cox)
+dose_cox <- cox_summ$coefficients["dose", "exp(coef)"]
+pris_cox <- cox_summ$coefficients["as.factor(prison)1", "exp(coef)"]
+clin_cox <- cox_summ$coefficients["as.factor(clinic)2", "exp(coef)"]
+
+
+# (b) individuals from clinic 2 without a history of incarceration administered dosage of 40 mg/day to individuals from clinic 1 with a history of incarceration administered a dosage of 100 mg/day
+hr_2b_est <- exp((40 - 100) * coef(weibull_aft)["dose"] - coef(weibull_aft)["as.factor(prison)1"] + coef(weibull_aft)["as.factor(clinic)2"])
+hr_2b_se <- deltamethod(g = ~exp(-60 * x1 - x2 + x3),
+                        mean = coef(weibull_aft)[c("dose", "as.factor(prison)1", "as.factor(clinic)2")],
+                        cov = vcov(weibull_aft)[c("dose", "as.factor(prison)1", "as.factor(clinic)2"), c("dose", "as.factor(prison)1", "as.factor(clinic)2")])
+
+hr_2b_est_low <- hr_2b_est - 1.96 * hr_2b_se
+hr_2b_est_high <- hr_2b_est + 1.96 * hr_2b_se
+
+# median(T) = shape * (log2) ^ (1/scale)
+# baseline
+# weibull_aft$res["scale","est"] * (log(2)) ^ (1/weibull_aft$res["shape","est"])
+
+# a model-based estimate of the median time until exit from maintenance
+# individuals from clinic 1 with a history of incarceration administered a dosage of 100 mg/day
+med_time_grp0  <- exp(100 * coef(weibull_aft)["dose"] + coef(weibull_aft)["as.factor(prison)1"]) *
+  log(2) ^ (1 / exp(coef(weibull_aft)["shape"])) * 
+  exp(coef(weibull_aft)["scale"])
+
+med_time_grp0_se <- deltamethod(g = ~ exp(100 * x1 + x2) * log(2) ^ (1 / exp(x3)) * exp(x4),
+                                mean = 
+                                  coef(weibull_aft)[c("dose", "as.factor(prison)1", "shape", "scale")],
+                                cov = 
+                                  vcov(weibull_aft)[c("dose", "as.factor(prison)1", "shape", "scale"),
+                                                    c("dose", "as.factor(prison)1", "shape", "scale")])
+
+med_time_grp0_high <-  med_time_grp0 - 1.96 * med_time_grp0_se
+med_time_grp0_low <- med_time_grp0 + 1.96 * med_time_grp0_se
+
+# a model-based estimate of the median time until exit from maintenance
+# individuals from clinic 2 without a history of incarceration administered dosage of 40 mg/day
+med_time_grp1  <- exp(40 * coef(weibull_aft)["dose"] + coef(weibull_aft)["as.factor(clinic)2"]) *
+  log(2) ^ (1 / exp(coef(weibull_aft)["shape"])) * 
+  exp(coef(weibull_aft)["scale"])
+med_time_grp1_se <- deltamethod(g = ~ exp(40 * x1 + x2) * log(2) ^ (1 / exp(x3)) * exp(x4),
+                                mean = 
+                                  coef(weibull_aft)[c("dose", "as.factor(clinic)2", "shape", "scale")],
+                                cov = 
+                                  vcov(weibull_aft)[c("dose", "as.factor(clinic)2", "shape", "scale"),
+                                                    c("dose", "as.factor(clinic)2", "shape", "scale")])
+
+med_time_grp1_high <-  med_time_grp1 - 1.96 * med_time_grp1_se
+med_time_grp1_low <- med_time_grp1 + 1.96 * med_time_grp1_se
+
+# (c)
+weibull_aft_int <- flexsurvreg(s ~ dose + dose * as.factor(prison) + as.factor(clinic), data = dt, dist = "weibull")
+
+# comparing, among patients with a history of previous incarceration and from the same clinic, patients administered 80mg/day to patients administered 60mg/day
+hr_3a_pris1 <- exp((80 - 60) * coef(weibull_aft_int)["dose"] + (80 - 60) * coef(weibull_aft_int)["dose:as.factor(prison)1"])
+
+hr_3a_pris1_se <- deltamethod(g = ~exp(20 * x1 + 20 * x2),
+                        mean = coef(weibull_aft_int)[c("dose", "dose:as.factor(prison)1")],
+                        cov = vcov(weibull_aft_int)[c("dose", "dose:as.factor(prison)1"),
+                                                c("dose", "dose:as.factor(prison)1")])
+hr_3a_pris1_low <- hr_3a_pris1 - 1.96 * hr_3a_pris1_se
+hr_3a_pris1_high <- hr_3a_pris1 + 1.96 * hr_3a_pris1_se
+
+
+# the same among patients without a history of previous incarceration and from the same clinic
+hr_3a_pris0 <- exp((80 - 60) * coef(weibull_aft_int)["dose"])
+hr_3a_pris0_se <- deltamethod(g = ~exp(20 * x1),
+                        mean = coef(weibull_aft_int)["dose"],
+                        cov = vcov(weibull_aft_int)[c("dose"),c("dose")])
+hr_3a_pris0_low <- hr_3a_pris0 - 1.96 * hr_3a_pris0_se
+hr_3a_pris0_high <- hr_3a_pris0 + 1.96 * hr_3a_pris0_se
+
+# p-value for the interaction
+wwald <- weibull_aft_int$res["dose:as.factor(prison)1","est"]/weibull_aft_int$res["dose:as.factor(prison)1", "se"]
+pp <- 2*pnorm(-abs(wwald))
+```
+
+(a) 
+* Using the weibull AFT model, for two subpopulations with the same clinic and history of previous incarceration differing 1 unit in dosage, the average survival time in the group with 1 more unit dosage is `r round(dose_coef, 4)` (95% CI: `r round(dose_coef0, 4)`, `r round(dose_coef1, 4)`) times as long as the group with lower unit of dosage. 
+
+* Additionally, the time ratios for patients with incarceration history compared to those without the history is `r round(pris_coef, 4)` (95% CI: `r round(pris_coef0, 4)`, `r round(pris_coef1, 4)`) adjusting for dosage and clinic. 
+
+* The time ratios for patients in clinic 2 compared to those in clinic 1 is `r round(clin_coef, 4)` (95% CI: `r round(clin_coef0, 4)`, `r round(clin_coef1, 4)`) adjusting for dosage and history of incarceration.
+
+* With Cox model, we see that the hazard risk of exiting from maintenance for patients with 1 more unit of dosage is `r round(dose_cox, 4)` < 1 times the risk of the group with fewer unit of dose. So increasing the dosage decrease the risk of exiting, and increasing the time to exit. This is consistent with the weibull AFT conclusion that those with higher dosage have longer average time to exit compare to those with lower dosage. 
+
+* Additionally, the hazard ratio for patients with incarceration history compared to those without the history is `r round(pris_cox, 4)` > 1 adjusting for dosage and clinic, indicating those with incarceration have higher risk of exiting and therefore, shorter average time till exit. This is also consistent with the AFT results of `r round(pris_coef, 4)` saying those with incarceration history have short survival time.
+
+* The hazard ratio for patients in clinic 2 compared to those in clinic 1 is `r round(clin_cox, 4)` < 1, adjusting for dosage and history of incarceration. Again, we conclude that those in clinic 1 have much lower risk of exiting and stay for longer. This is also consistent with the AFT time ratio that those in clinic 2 have much longer survival time (`r round(clin_coef, 4)` times as long as) compared to those in clinic 1.
+
+* Using the generalized gamma baseline distribution instead, the  average survival time in the group with X + 1 unit of dose is `r round(dose_gamma , 4)` (95% CI:`r round(dose_gamma0, 4)`, `r round(dose_gamma1, 4)`) times as long as the group with X unit of dose. 
+
+* Additionally, with the generalized gamma model, the time ratios for patients with incarceration history compared to those without the history is `r round(pris_gamma, 4)` (95% CI: `r round(pris_gamma0, 4)`, `r round(pris_gamma1, 4)`) adjusting for dosage and clinic. 
+
+* The time ratios for patients in clinic 2 compared to those in clinic 1 is `r round(clin_gamma, 4)` (95% CI: `r round(clin_gamma0, 4)`, `r round(clin_gamma1, 4)`) adjusting for dosage and history of incarceration.
+
+(b) 
+
+* The ratio of mean/median time until exit from maintenance comparing individuals from clinic 2 without a history of incarceration administered dosage of 40 mg/day to individuals from clinic 1 with a history of incarceration administered a dosage of 100 mg/day is `r round(hr_2b_est, 4)` with 95% CI  of (`r round(hr_2b_est_low, 4)`, `r round(hr_2b_est_high, 4)`). 
+
+* The median time until exit from maintenance for individuals from clinic 1 with a history of incarceration administered a dosage of 100 mg/day is `r round(med_time_grp0, 4)` days with 95% CI of (`r round(med_time_grp0_low, 4)`, `r round(med_time_grp0_high, 4)`).
+
+* The median time until exit from maintenance for individuals from clinic 2 without a history of incarceration administered dosage of 40 mg/day is `r round(med_time_grp1, 4)` days with 95% CI of (`r round(med_time_grp1_low, 4)`, `r round(med_time_grp1_high, 4)`). 
+
+
+(c) 
+
+* Using the weibull AFT model adjusting for both clinic and history of previous incarceration and allowing interaction between methadone dosage and history of previous incarceration, among patients with a history of previous incarceration and from the same clinic, the average survival time for patients administered 80mg/day is `r round(hr_3a_pris1, 4)` times with 95% CI of (`r round(hr_3a_pris1_low, 4)`, `r round(hr_3a_pris1_high, 4)`) as long as patients administered 60mg/day.
+
+* Among patients without a history of previous incarceration and from the same clinic, the mean survival time for patients administered 80mg/day is `r round(hr_3a_pris0, 4)` times with 95% CI of (`r round(hr_3a_pris0_low, 4)`, `r round(hr_3a_pris0_high, 4)`) as long as patients administered 60mg/day.
+
+* Based on the p-value `r pp` > 0.05 from the wald test for the interaction term between dosage and history of incarceration, we can not reject the null hypothesis that the associate between dosage and risk of exiting from maintenance does not differ by history of incarceration. so we can not conclude that those two subgroup-specific time ratios significantly different from one another.
+
+### PROBLEM 2
+(a)
+The point estimate for the median age at blindness due to diabetic retinopathy among untreated is 24.4 (95% CI: 20.5, 26.5). Repeat the exercise but ignore any left-truncation present, we gave point estimate at 44.5 (95% CI: 40.8, 48.2).
+
+(b) 
+The initiation event is diagnosis of diabetic retinopathy and the terminating event is blindness. Since all patients are enrolled after their diagnosis of DR, all of them are subject to left-truncation. So the risk set at time t must take into account when the patients began to be observed and we define the risk set at time t as the collection of patients whose left-truncation time (age at enrollment) is before t and follow-up time (age at blindness) is longer than t. The method remains valid because age at enrollment into the study and the age at blindness is independent. Additionally, we still have independent censoring because we apply the same cut off (end of follow-up) for all patients. 
+
+```{r, include = TRUE}
+## problem 2
+# (a)
+dt2 <- read.csv("diabetes.csv", sep = ",")
+dt2$ageblind <- dt2$age + dt2$time/12
+unt <- dt2[dt2$treat == 0,]
+
+# accounting for left truncation
+surv.truncate <- Surv(unt$age, unt$ageblind, unt$status)
+km.truncate <- survfit(surv.truncate ~ 1, unt, conf.type = "log-log")
+plot(km.truncate, conf.int = TRUE, xlab = "Age at blindness (Years)",
+     ylab = "Survival Probability",
+     main = "Survival Probability Accounting for Left Truncation")
+
+# not accounting for left truncation
+# accounting for left truncation
+surv.truncate0 <- Surv(unt$ageblind, unt$status)
+km.truncate0 <- survfit(surv.truncate0 ~ 1, unt, conf.type = "log-log")
+plot(km.truncate0, conf.int = TRUE, xlab = "Age at blindness (Years)", 
+     ylab = "Survival Probability",
+     main = "Survival Probability not Accounting for Left Truncation")
+```
+
+
+### Code
+
+```{r, eval = FALSE, include = TRUE, echo = TRUE}
+## problem 1
+# (a)
+dt <- read.csv("addicts.csv", sep = ",")
+s <- with(dt, Surv(time, event))
+
+# aft weibull
+weibull_aft <- flexsurvreg(s ~ dose + as.factor(prison) + as.factor(clinic), data = dt, dist = "weibull")
+weibull_aft
+dose_coef <- exp(weibull_aft$res["dose","est"])
+pris_coef <- exp(weibull_aft$res["as.factor(prison)1","est"])
+clin_coef <- exp(weibull_aft$res["as.factor(clinic)2","est"])
+
+# lower bound
+dose_coef0 <- exp(weibull_aft$res["dose","L95%"])
+pris_coef0 <- exp(weibull_aft$res["as.factor(prison)1","L95%"])
+clin_coef0 <- exp(weibull_aft$res["as.factor(clinic)2","L95%"])
+
+# higher bound
+dose_coef1 <- exp(weibull_aft$res["dose","U95%"])
+pris_coef1 <- exp(weibull_aft$res["as.factor(prison)1","U95%"])
+clin_coef1 <- exp(weibull_aft$res["as.factor(clinic)2","U95%"])
+
+# aft generalized gamma
+gamma_aft <- flexsurvreg(s ~ dose + as.factor(prison) + as.factor(clinic), data = dt, dist = "gengamma")
+gamma_aft
+dose_gamma <- exp(gamma_aft$res["dose","est"])
+pris_gamma <- exp(gamma_aft$res["as.factor(prison)1","est"])
+clin_gamma <- exp(gamma_aft$res["as.factor(clinic)2","est"])
+
+# lower bound
+dose_gamma0 <- exp(gamma_aft$res["dose","L95%"])
+pris_gamma0 <- exp(gamma_aft$res["as.factor(prison)1","L95%"])
+clin_gamma0 <- exp(gamma_aft$res["as.factor(clinic)2","L95%"])
+
+# higher bound
+dose_gamma1 <- exp(gamma_aft$res["dose","U95%"])
+pris_gamma1 <- exp(gamma_aft$res["as.factor(prison)1","U95%"])
+clin_gamma1 <- exp(gamma_aft$res["as.factor(clinic)2","U95%"])
+
+# cox
+cox = coxph(s ~ dose + as.factor(prison) + as.factor(clinic), dt)
+cox_summ <- summary(cox)
+cox_summ
+dose_cox <- cox_summ$coefficients["dose", "exp(coef)"]
+pris_cox <- cox_summ$coefficients["as.factor(prison)1", "exp(coef)"]
+clin_cox <- cox_summ$coefficients["as.factor(clinic)2", "exp(coef)"]
+
+
+# (b) individuals from clinic 2 without a history of incarceration administered dosage of 40 mg/day to individuals from clinic 1 with a history of incarceration administered a dosage of 100 mg/day
+hr_2b_est <- exp((40 - 100) * coef(weibull_aft)["dose"] - coef(weibull_aft)["as.factor(prison)1"] + coef(weibull_aft)["as.factor(clinic)2"])
+hr_2b_se <- deltamethod(g = ~exp(-60 * x1 - x2 + x3),
+                        mean = coef(weibull_aft)[c("dose", "as.factor(prison)1", "as.factor(clinic)2")],
+                        cov = vcov(weibull_aft)[c("dose", "as.factor(prison)1", "as.factor(clinic)2"), c("dose", "as.factor(prison)1", "as.factor(clinic)2")])
+
+hr_2b_est_low <- hr_2b_est - 1.96 * hr_2b_se
+hr_2b_est_high <- hr_2b_est + 1.96 * hr_2b_se
+
+# median(T) = shape * (log2) ^ (1/scale)
+# baseline
+weibull_aft$res["scale","est"] * (log(2)) ^ (1/weibull_aft$res["shape","est"])
+
+# a model-based estimate of the median time until exit from maintenance
+# individuals from clinic 1 with a history of incarceration administered a dosage of 100 mg/day
+med_time_grp0  <- exp(100 * coef(weibull_aft)["dose"] + coef(weibull_aft)["as.factor(prison)1"]) *
+  log(2) ^ (1 / exp(coef(weibull_aft)["shape"])) * 
+  exp(coef(weibull_aft)["scale"])
+
+med_time_grp0_se <- deltamethod(g = ~ exp(100 * x1 + x2) * log(2) ^ (1 / exp(x3)) * exp(x4),
+                                mean = 
+                                  coef(weibull_aft)[c("dose", "as.factor(prison)1", "shape", "scale")],
+                                cov = 
+                                  vcov(weibull_aft)[c("dose", "as.factor(prison)1", "shape", "scale"),
+                                                    c("dose", "as.factor(prison)1", "shape", "scale")])
+
+med_time_grp0_high <-  med_time_grp0 - 1.96 * med_time_grp0_se
+med_time_grp0_low <- med_time_grp0 + 1.96 * med_time_grp0_se
+
+# a model-based estimate of the median time until exit from maintenance
+# individuals from clinic 2 without a history of incarceration administered dosage of 40 mg/day
+med_time_grp1  <- exp(40 * coef(weibull_aft)["dose"] + coef(weibull_aft)["as.factor(clinic)2"]) *
+  log(2) ^ (1 / exp(coef(weibull_aft)["shape"])) * 
+  exp(coef(weibull_aft)["scale"])
+med_time_grp1_se <- deltamethod(g = ~ exp(40 * x1 + x2) * log(2) ^ (1 / exp(x3)) * exp(x4),
+                                mean = 
+                                  coef(weibull_aft)[c("dose", "as.factor(clinic)2", "shape", "scale")],
+                                cov = 
+                                  vcov(weibull_aft)[c("dose", "as.factor(clinic)2", "shape", "scale"),
+                                                    c("dose", "as.factor(clinic)2", "shape", "scale")])
+
+med_time_grp1_high <-  med_time_grp1 - 1.96 * med_time_grp1_se
+med_time_grp1_low <- med_time_grp1 + 1.96 * med_time_grp1_se
+
+# (c)
+weibull_aft_int <- flexsurvreg(s ~ dose + dose * as.factor(prison) + as.factor(clinic), data = dt, dist = "weibull")
+weibull_aft_int
+
+# comparing, among patients with a history of previous incarceration and from the same clinic, patients administered 80mg/day to patients administered 60mg/day
+hr_3a_pris1 <- exp((80 - 60) * coef(weibull_aft_int)["dose"] + (80 - 60) * coef(weibull_aft_int)["dose:as.factor(prison)1"])
+
+hr_3a_pris1_se <- deltamethod(g = ~exp(20 * x1 + 20 * x2),
+                        mean = coef(weibull_aft_int)[c("dose", "dose:as.factor(prison)1")],
+                        cov = vcov(weibull_aft_int)[c("dose", "dose:as.factor(prison)1"),
+                                                c("dose", "dose:as.factor(prison)1")])
+hr_3a_pris1_low <- hr_3a_pris1 - 1.96 * hr_3a_pris1_se
+hr_3a_pris1_high <- hr_3a_pris1 + 1.96 * hr_3a_pris1_se
+
+
+# the same among patients without a history of previous incarceration and from the same clinic
+hr_3a_pris0 <- exp((80 - 60) * coef(weibull_aft_int)["dose"])
+hr_3a_pris0_se <- deltamethod(g = ~exp(20 * x1),
+                        mean = coef(weibull_aft_int)["dose"],
+                        cov = vcov(weibull_aft_int)[c("dose"),c("dose")])
+hr_3a_pris0_low <- hr_3a_pris0 - 1.96 * hr_3a_pris0_se
+hr_3a_pris0_high <- hr_3a_pris0 + 1.96 * hr_3a_pris0_se
+
+# p-value for the interaction
+wwald <- weibull_aft_int$res["dose:as.factor(prison)1","est"]/weibull_aft_int$res["dose:as.factor(prison)1", "se"]
+pp <- 2*pnorm(-abs(wwald))
+
+## problem 2
+# (a)
+dt2 <- read.csv("diabetes.csv", sep = ",")
+colnames(dt2)
+dt2$ageblind <- dt2$age + dt2$time/12
+unt <- dt2[dt2$treat == 0,]
+
+# accounting for left truncation
+surv.truncate <- Surv(unt$age, unt$ageblind, unt$status)
+km.truncate <- survfit(surv.truncate ~ 1, unt, conf.type = "log-log")
+plot(km.truncate, conf.int = TRUE, xlab = "Age at blindness (Years)",
+     ylab = "Survival Probability",
+     main = "Survival Probability Accounting for Left Truncation")
+
+# not accounting for left truncation
+# accounting for left truncation
+surv.truncate0 <- Surv(unt$ageblind, unt$status)
+km.truncate0 <- survfit(surv.truncate0 ~ 1, unt, conf.type = "log-log")
+plot(km.truncate0, conf.int = TRUE, xlab = "Age at blindness (Years)", 
+     ylab = "Survival Probability",
+     main = "Survival Probability not Accounting for Left Truncation")
+
+# manual
+# med.age0 <- km.truncate0$time[km.truncate0$surv == max(km.truncate0$surv[km.truncate0$surv <= 0.5])]
+# med.age.low0 <- km.truncate0$time[km.truncate0$lower == max(km.truncate0$lower[km.truncate0$lower <= 0.5])]
+# med.age.high0 <- km.truncate0$time[km.truncate0$upper == max(km.truncate0$upper[km.truncate0$upper <= 0.5])][1]
+```
